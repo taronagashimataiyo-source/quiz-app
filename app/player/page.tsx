@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { ROOM_ID, supabase, supabaseConfigError } from '@/lib/supabase';
-import { Choice, Room } from '@/lib/types';
+import { Choice, Question, Room } from '@/lib/types';
 
 const choiceLabels: Choice[] = ['A', 'B', 'C', 'D'];
 
@@ -10,6 +10,7 @@ export default function PlayerPage() {
   const [name, setName] = useState('');
   const [joinedName, setJoinedName] = useState('');
   const [room, setRoom] = useState<Room | null>(null);
+  const [question, setQuestion] = useState<Question | null>(null);
   const [selected, setSelected] = useState<Choice | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
@@ -17,15 +18,16 @@ export default function PlayerPage() {
     if (!supabase) return;
     const client = supabase;
 
-    const load = async () => {
+    const loadRoom = async () => {
       const { data } = await client.from('rooms').select('*').eq('id', ROOM_ID).maybeSingle();
       if (data) setRoom(data as Room);
     };
-    void load();
+
+    void loadRoom();
 
     const channel = client
       .channel('player-room')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${ROOM_ID}` }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${ROOM_ID}` }, loadRoom)
       .subscribe();
 
     return () => {
@@ -34,10 +36,30 @@ export default function PlayerPage() {
   }, []);
 
   useEffect(() => {
+    if (!supabase || !room?.question_id) {
+      setQuestion(null);
+      return;
+    }
+    const client = supabase;
+
+    const loadQuestion = async () => {
+      const { data } = await client.from('questions').select('*').eq('id', room.question_id).maybeSingle();
+      setQuestion((data as Question | null) ?? null);
+    };
+
+    void loadQuestion();
+  }, [room?.question_id]);
+
+  useEffect(() => {
+    setSelected(null);
+    setSubmitted(false);
+  }, [room?.question_id]);
+
+  useEffect(() => {
     if (!supabase || !joinedName || !room?.question_id) return;
     const client = supabase;
 
-    const load = async () => {
+    const loadAnswer = async () => {
       const { data } = await client
         .from('answers')
         .select('selected_choice')
@@ -48,11 +70,12 @@ export default function PlayerPage() {
       setSubmitted(Boolean(data));
       if (data?.selected_choice) setSelected(data.selected_choice as Choice);
     };
-    void load();
+
+    void loadAnswer();
 
     const channel = client
       .channel(`player-answer-${joinedName}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'answers', filter: `room_id=eq.${ROOM_ID}` }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'answers', filter: `room_id=eq.${ROOM_ID}` }, loadAnswer)
       .subscribe();
 
     return () => {
@@ -60,10 +83,13 @@ export default function PlayerPage() {
     };
   }, [joinedName, room?.question_id]);
 
-  const canAnswer = useMemo(() => !!joinedName && room?.status === 'open' && !submitted, [joinedName, room?.status, submitted]);
+  const canAnswer = useMemo(
+    () => !!joinedName && room?.status === 'open' && !submitted && question?.answer_type === 'single',
+    [joinedName, question?.answer_type, room?.status, submitted],
+  );
 
   const submitAnswer = async () => {
-    if (!supabase || !room || !selected || !joinedName || submitted) return;
+    if (!supabase || !room?.question_id || !selected || !joinedName || submitted) return;
     const client = supabase;
     await client.from('answers').insert({
       room_id: ROOM_ID,
@@ -78,31 +104,68 @@ export default function PlayerPage() {
     <main className="mx-auto min-h-screen w-full max-w-md space-y-4 p-4">
       <h1 className="text-2xl font-bold">参加者画面</h1>
       <p className="rounded bg-slate-200 p-3 text-sm">手順: ①名前入力 → ②選択肢を1つ選ぶ → ③送信</p>
-      {supabaseConfigError && <p className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">{supabaseConfigError}</p>}
+      {supabaseConfigError && (
+        <p className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">{supabaseConfigError}</p>
+      )}
 
       {!joinedName ? (
         <div className="space-y-3 rounded bg-white p-4 shadow">
           <label className="text-sm font-medium">表示名</label>
-          <input className="w-full rounded border p-2" placeholder="例: たなか" value={name} onChange={(e) => setName(e.target.value)} />
-          <button className="w-full rounded bg-blue-600 p-3 text-white disabled:bg-slate-400" disabled={!name.trim() || !!supabaseConfigError} onClick={() => setJoinedName(name.trim())}>参加する</button>
+          <input
+            className="w-full rounded border p-2"
+            placeholder="例: たなか"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <button
+            className="w-full rounded bg-blue-600 p-3 text-white disabled:bg-slate-400"
+            disabled={!name.trim() || !!supabaseConfigError}
+            onClick={() => setJoinedName(name.trim())}
+          >
+            参加する
+          </button>
         </div>
       ) : (
         <section className="space-y-3 rounded bg-white p-4 shadow">
-          <p className="text-sm text-slate-600">参加名: <span className="font-semibold">{joinedName}</span></p>
+          <p className="text-sm text-slate-600">
+            参加名: <span className="font-semibold">{joinedName}</span>
+          </p>
           <h2 className="font-semibold">現在の問題</h2>
-          <p>{room?.question_text || 'ホストが問題を準備中です。'}</p>
+          <p>{question?.question_text || 'ホストが問題を準備中です。'}</p>
+          {question?.answer_type !== 'single' && question && (
+            <p className="text-sm text-amber-700">この問題形式は現在未対応です（singleのみ対応）。</p>
+          )}
+
           <div className="grid grid-cols-2 gap-2">
             {choiceLabels.map((c) => {
-              const text = c === 'A' ? room?.choice_a : c === 'B' ? room?.choice_b : c === 'C' ? room?.choice_c : room?.choice_d;
+              const text =
+                c === 'A'
+                  ? question?.choice_a
+                  : c === 'B'
+                    ? question?.choice_b
+                    : c === 'C'
+                      ? question?.choice_c
+                      : question?.choice_d;
               return (
-                <button key={c} disabled={!canAnswer} onClick={() => setSelected(c)} className={`rounded border p-3 text-left ${selected === c ? 'border-blue-600 bg-blue-50' : 'border-slate-300'} disabled:opacity-50`}>
+                <button
+                  key={c}
+                  disabled={!canAnswer}
+                  onClick={() => setSelected(c)}
+                  className={`rounded border p-3 text-left ${selected === c ? 'border-blue-600 bg-blue-50' : 'border-slate-300'} disabled:opacity-50`}
+                >
                   <div className="font-bold">{c}</div>
                   <div className="text-sm">{text || '-'}</div>
                 </button>
               );
             })}
           </div>
-          <button disabled={!canAnswer || !selected} onClick={submitAnswer} className="w-full rounded bg-emerald-600 p-3 font-semibold text-white disabled:bg-slate-400">回答を送信</button>
+          <button
+            disabled={!canAnswer || !selected}
+            onClick={submitAnswer}
+            className="w-full rounded bg-emerald-600 p-3 font-semibold text-white disabled:bg-slate-400"
+          >
+            回答を送信
+          </button>
           {submitted && <p className="font-semibold text-emerald-700">回答済みです（変更不可）</p>}
           {room?.status === 'closed' && <p className="text-slate-700">この問題は締め切られました。</p>}
         </section>
