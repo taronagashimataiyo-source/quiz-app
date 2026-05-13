@@ -1,16 +1,26 @@
 export type Choice = 'A' | 'B' | 'C' | 'D';
+export type AnswerType = 'single' | 'multiple';
+
+export type RoomStatus = 'waiting' | 'open' | 'closed';
 
 export type Room = {
   id: string;
-  question_id: string;
+  question_id: string | null;
+  status: RoomStatus;
+  updated_at: string;
+};
+
+export type Question = {
+  id: string;
+  question_no: number;
   question_text: string;
   choice_a: string;
   choice_b: string;
   choice_c: string;
   choice_d: string;
-  correct_choice: Choice | null;
-  status: 'waiting' | 'open' | 'closed';
-  updated_at: string;
+  correct_choice: Choice;
+  answer_type: AnswerType;
+  created_at: string;
 };
 
 export type Answer = {
@@ -26,4 +36,10 @@ export type Score = {
   name: string;
   correct_count: number;
   updated_at: string;
+};
+
+export type ScoreEvent = {
+  room_id: string;
+  question_id: string;
+  applied_at: string;
 };
