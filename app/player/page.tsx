@@ -15,28 +15,30 @@ export default function PlayerPage() {
 
   useEffect(() => {
     if (!supabase) return;
+    const client = supabase;
 
     const load = async () => {
-      const { data } = await supabase.from('rooms').select('*').eq('id', ROOM_ID).maybeSingle();
+      const { data } = await client.from('rooms').select('*').eq('id', ROOM_ID).maybeSingle();
       if (data) setRoom(data as Room);
     };
     void load();
 
-    const channel = supabase
+    const channel = client
       .channel('player-room')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${ROOM_ID}` }, load)
       .subscribe();
 
     return () => {
-      void supabase.removeChannel(channel);
+      void client.removeChannel(channel);
     };
   }, []);
 
   useEffect(() => {
     if (!supabase || !joinedName || !room?.question_id) return;
+    const client = supabase;
 
     const load = async () => {
-      const { data } = await supabase
+      const { data } = await client
         .from('answers')
         .select('selected_choice')
         .eq('room_id', ROOM_ID)
@@ -48,13 +50,13 @@ export default function PlayerPage() {
     };
     void load();
 
-    const channel = supabase
+    const channel = client
       .channel(`player-answer-${joinedName}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'answers', filter: `room_id=eq.${ROOM_ID}` }, load)
       .subscribe();
 
     return () => {
-      void supabase.removeChannel(channel);
+      void client.removeChannel(channel);
     };
   }, [joinedName, room?.question_id]);
 
@@ -62,7 +64,8 @@ export default function PlayerPage() {
 
   const submitAnswer = async () => {
     if (!supabase || !room || !selected || !joinedName || submitted) return;
-    await supabase.from('answers').insert({
+    const client = supabase;
+    await client.from('answers').insert({
       room_id: ROOM_ID,
       question_id: room.question_id,
       name: joinedName,
