@@ -27,28 +27,30 @@ export default function HostPage() {
 
   useEffect(() => {
     if (!supabase) return;
+    const client = supabase;
+
     const loadRoom = async () => {
-      const { data } = await supabase.from('rooms').select('*').eq('id', ROOM_ID).maybeSingle();
+      const { data } = await client.from('rooms').select('*').eq('id', ROOM_ID).maybeSingle();
       if (data) setRoom(data as Room);
     };
     const loadScores = async () => {
-      const { data } = await supabase.from('scores').select('*').eq('room_id', ROOM_ID).order('correct_count', { ascending: false });
+      const { data } = await client.from('scores').select('*').eq('room_id', ROOM_ID).order('correct_count', { ascending: false });
       setScores((data || []) as Score[]);
     };
     void loadRoom();
     void loadScores();
 
-    const roomChannel = supabase.channel('host-room').on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${ROOM_ID}` }, loadRoom).subscribe();
-    const answerChannel = supabase.channel('host-answers').on('postgres_changes', { event: '*', schema: 'public', table: 'answers', filter: `room_id=eq.${ROOM_ID}` }, async () => {
-      const { data } = await supabase.from('answers').select('*').eq('room_id', ROOM_ID).eq('question_id', room.question_id);
+    const roomChannel = client.channel('host-room').on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${ROOM_ID}` }, loadRoom).subscribe();
+    const answerChannel = client.channel('host-answers').on('postgres_changes', { event: '*', schema: 'public', table: 'answers', filter: `room_id=eq.${ROOM_ID}` }, async () => {
+      const { data } = await client.from('answers').select('*').eq('room_id', ROOM_ID).eq('question_id', room.question_id);
       setAnswers((data || []) as Answer[]);
     }).subscribe();
-    const scoreChannel = supabase.channel('host-scores').on('postgres_changes', { event: '*', schema: 'public', table: 'scores', filter: `room_id=eq.${ROOM_ID}` }, loadScores).subscribe();
+    const scoreChannel = client.channel('host-scores').on('postgres_changes', { event: '*', schema: 'public', table: 'scores', filter: `room_id=eq.${ROOM_ID}` }, loadScores).subscribe();
 
     return () => {
-      void supabase.removeChannel(roomChannel);
-      void supabase.removeChannel(answerChannel);
-      void supabase.removeChannel(scoreChannel);
+      void client.removeChannel(roomChannel);
+      void client.removeChannel(answerChannel);
+      void client.removeChannel(scoreChannel);
     };
   }, [room.question_id]);
 
@@ -56,7 +58,8 @@ export default function HostPage() {
 
   const upsertRoom = async (next: Room) => {
     if (!supabase) return;
-    await supabase.from('rooms').upsert({ ...next, updated_at: new Date().toISOString() });
+    const client = supabase;
+    await client.from('rooms').upsert({ ...next, updated_at: new Date().toISOString() });
   };
 
   const startQuestion = async () => {
@@ -70,12 +73,13 @@ export default function HostPage() {
     setRoom(closed);
     await upsertRoom(closed);
     if (!supabase || !room.correct_choice) return;
+    const client = supabase;
 
     const winners = answers.filter((a) => a.selected_choice === room.correct_choice);
     for (const w of winners) {
-      const { data } = await supabase.from('scores').select('correct_count').eq('room_id', ROOM_ID).eq('name', w.name).maybeSingle();
+      const { data } = await client.from('scores').select('correct_count').eq('room_id', ROOM_ID).eq('name', w.name).maybeSingle();
       const nextCount = (data?.correct_count || 0) + 1;
-      await supabase.from('scores').upsert({ room_id: ROOM_ID, name: w.name, correct_count: nextCount, updated_at: new Date().toISOString() });
+      await client.from('scores').upsert({ room_id: ROOM_ID, name: w.name, correct_count: nextCount, updated_at: new Date().toISOString() });
     }
   };
 
